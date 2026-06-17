@@ -1,0 +1,19 @@
+# LinkedIn session
+linkedin_profile/
+
+# Excel
+*.xlsx
+*.xls
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# VSCode
+.vscode/
+
+# Environment
+.env
+.venv/
+venv/
