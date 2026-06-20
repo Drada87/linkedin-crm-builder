@@ -10,12 +10,12 @@ from datetime import datetime
 
 inicio = datetime.now()
 
-# Cantidad de contactos nuevos a procesar en esta ejecución.
+# Cantidad de contactos nuevos a procesar en esta ejecuciÃƒÂ³n.
 OBJETIVO = 100
 
 # Cambiar solo este valor en cada tanda:
 # tanda_1, tanda_2, tanda_3, etc.
-NOMBRE_TANDA = "tanda_2"
+NOMBRE_TANDA = "tanda_5"
 
 # Archivo consolidado entre todas las tandas.
 ARCHIVO_MAESTRO = "linkedin_master.xlsx"
@@ -26,6 +26,12 @@ ARCHIVO_BACKUP = f"backup_{NOMBRE_TANDA}.xlsx"
 
 # Limite preventivo para evitar que una tanda quede scrolleando sin fin.
 MAX_SCROLLS = 120
+
+# Cantidad de scrolls consecutivos permitidos sin que cambie la lista visible.
+# Esto evita cortar una tanda solo porque no aparecieron contactos nuevos,
+# algo normal en tandas avanzadas donde se saltan contactos ya guardados.
+# Solo se asume fin de listado cuando el scroll deja de mover la lista.
+MAX_SCROLLS_SIN_AVANCE = 3
 
 
 # ============================================================
@@ -210,7 +216,7 @@ def extraer_info_visible(page, nombre):
                 if texto.startswith("Movil"):
                     continue
 
-                if texto.startswith("Móvil"):
+                if texto.startswith("MÃƒÂ³vil"):
                     continue
 
                 if "@" in texto:
@@ -292,6 +298,12 @@ with sync_playwright() as p:
     errores = 0
     scroll_num = 0
 
+    # Control de fin de lista:
+    # compara los nombres visibles antes/despues de scrollear.
+    # Si la misma lista se repite varias veces, se guarda lo parcial y termina.
+    scrolls_sin_avance = 0
+    firma_visible_anterior = ""
+
     while len(resultados) < OBJETIVO and scroll_num <= MAX_SCROLLS:
 
         favoritos = page.locator(
@@ -303,6 +315,23 @@ with sync_playwright() as p:
         )
 
         visibles = favoritos.count()
+
+        # Firma de la lista visible:
+        # se arma con los nombres renderizados en la columna izquierda.
+        # No se usa para extraer datos; solo para saber si el scroll avanzo.
+        nombres_visibles = []
+
+        for v in range(visibles):
+            try:
+                nombres_visibles.append(
+                    limpiar_texto(
+                        favoritos.nth(v).inner_text(timeout=1000)
+                    )
+                )
+            except:
+                pass
+
+        firma_visible_actual = "|".join(nombres_visibles)
 
         print(
             f"\nSCROLL {scroll_num} | "
@@ -491,6 +520,30 @@ with sync_playwright() as p:
                 continue
 
         if len(resultados) >= OBJETIVO:
+            break
+
+        # Si la firma visible no cambia, probablemente estamos cerca del final.
+        # Se esperan varios intentos antes de cortar para evitar falsos positivos.
+        if firma_visible_actual and firma_visible_actual == firma_visible_anterior:
+            scrolls_sin_avance += 1
+        else:
+            scrolls_sin_avance = 0
+
+        firma_visible_anterior = firma_visible_actual
+
+        # Guardado de seguridad: cubre el caso en que la tanda termine en 37, 58,
+        # 92 registros, etc., sin coincidir con el backup automatico cada 10.
+        if scrolls_sin_avance >= MAX_SCROLLS_SIN_AVANCE:
+            print(
+                "\nLa lista visible dejo de avanzar "
+                "despues de varios scrolls."
+            )
+
+            print(
+                "Guardando resultados parciales antes de cerrar..."
+            )
+
+            guardar_resultados(resultados)
             break
 
         scroll_num += 1
